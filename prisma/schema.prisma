@@ -1,0 +1,89 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// Mock KYC/ikamet doğrulaması geçmiş kullanıcı.
+// Gerçek TC Kimlik/CRM entegrasyonu yok — residencyVerified demo amaçlı her zaman true set edilir.
+model User {
+  id                String   @id @default(cuid())
+  fullName          String
+  fakeTcNo          String   @unique
+  residencyVerified Boolean  @default(true)
+  trustScore        Int      @default(0)
+  createdAt         DateTime @default(now())
+
+  reports       Report[]
+  confirmations Confirmation[]
+  comments      Comment[]
+}
+
+enum ReportStatus {
+  ACTIVE
+  UNDER_REVIEW
+  REMOVED
+}
+
+model Report {
+  id          String       @id @default(cuid())
+  category    String
+  lat         Float
+  lng         Float
+  description String
+  photoUrl    String?
+  status      ReportStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  expiresAt   DateTime
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id])
+
+  confirmations Confirmation[]
+  comments      Comment[]
+
+  @@index([category, createdAt])
+  @@index([status, expiresAt])
+}
+
+enum ConfirmationType {
+  TRUE
+  FALSE
+}
+
+// Bir kullanıcının bir Report için verdiği tek oy (doğru/asılsız).
+model Confirmation {
+  id        String           @id @default(cuid())
+  type      ConfirmationType
+  createdAt DateTime         @default(now())
+
+  reportId String
+  report   Report @relation(fields: [reportId], references: [id])
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([reportId, userId])
+}
+
+// Bir Report'a yapılan yorum, opsiyonel olarak bir fotoğraf ekleyebilir.
+model Comment {
+  id        String   @id @default(cuid())
+  text      String
+  photoUrl  String?
+  createdAt DateTime @default(now())
+
+  reportId String
+  report   Report @relation(fields: [reportId], references: [id])
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id])
+
+  @@index([reportId, createdAt])
+}
