@@ -6,6 +6,7 @@ import { BEYOGLU_CENTER } from "@/lib/geofence";
 import { getCategory } from "@/lib/categories";
 import { clampInterpolate } from "@/lib/scale";
 import type { MapReport } from "@/lib/reports";
+import type { DutyPharmacy } from "@/lib/pharmacies";
 import {
   addDistrictBoundary,
   loadMahalleLayer,
@@ -22,6 +23,51 @@ type MapContainer = HTMLDivElement & { __maplibreMap?: maplibregl.Map };
 const REPORT_ICON_SIZE_FAR = 40;
 const REPORT_ICON_SIZE_NEAR = 24;
 const REPORT_LABEL_ZOOM_THRESHOLD = 14.5;
+
+// Nöbetçi eczaneler resmi/statik bir katman olduğu için sabit boyutta gösterilir,
+// vatandaş bildirimlerinin aksine zoom'a göre ölçeklenmez.
+const PHARMACY_ICON_SIZE = 42;
+
+function createPharmacyMarkerElement() {
+  const el = document.createElement("div");
+  el.style.cssText =
+    "font-size:" +
+    PHARMACY_ICON_SIZE +
+    "px; line-height:1; cursor:pointer; filter:drop-shadow(0 1px 3px rgba(0,0,0,0.45));";
+  el.textContent = "💊";
+  return el;
+}
+
+function googleMapsDirectionsUrl(pharmacy: DutyPharmacy) {
+  return `https://www.google.com/maps/dir/?api=1&destination=${pharmacy.lat},${pharmacy.lng}`;
+}
+
+function createPharmacyPopupElement(pharmacy: DutyPharmacy) {
+  const el = document.createElement("div");
+  el.style.cssText = "font-family: sans-serif; font-size: 16px; max-width: 280px;";
+
+  const nameEl = document.createElement("div");
+  nameEl.style.cssText = "font-weight:700; font-size:18px; margin-bottom:6px;";
+  nameEl.textContent = `💊 ${pharmacy.name}`;
+  el.appendChild(nameEl);
+
+  const addressLink = document.createElement("a");
+  addressLink.style.cssText =
+    "display:block; color:#374151; margin-bottom:8px; text-decoration:underline; text-decoration-color:#d1d5db;";
+  addressLink.href = googleMapsDirectionsUrl(pharmacy);
+  addressLink.target = "_blank";
+  addressLink.rel = "noopener noreferrer";
+  addressLink.textContent = pharmacy.address;
+  el.appendChild(addressLink);
+
+  const phoneEl = document.createElement("a");
+  phoneEl.style.cssText = "display:block; color:#2563eb; font-weight:600; text-decoration:none;";
+  phoneEl.href = `tel:${pharmacy.phone}`;
+  phoneEl.textContent = pharmacy.phone;
+  el.appendChild(phoneEl);
+
+  return el;
+}
 
 function createReportMarkerElement(categoryLabel: string, icon: string) {
   const wrapper = document.createElement("div");
@@ -64,9 +110,11 @@ function applyReportIconScale(
 
 export function MapView({
   reports,
+  pharmacies,
   onSelectReport,
 }: {
   reports: MapReport[];
+  pharmacies: DutyPharmacy[];
   onSelectReport: (reportId: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -170,6 +218,28 @@ export function MapView({
       markers.forEach((m) => m.remove());
     };
   }, [reports, mapReady, onSelectReport]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const markers: maplibregl.Marker[] = [];
+
+    pharmacies.forEach((pharmacy) => {
+      const popup = new maplibregl.Popup({ offset: 20, maxWidth: "300px" }).setDOMContent(
+        createPharmacyPopupElement(pharmacy),
+      );
+      const marker = new maplibregl.Marker({ element: createPharmacyMarkerElement() })
+        .setLngLat([pharmacy.lng, pharmacy.lat])
+        .setPopup(popup)
+        .addTo(map);
+      markers.push(marker);
+    });
+
+    return () => {
+      markers.forEach((m) => m.remove());
+    };
+  }, [pharmacies, mapReady]);
 
   return <div ref={containerRef} className="w-full flex-1" />;
 }
