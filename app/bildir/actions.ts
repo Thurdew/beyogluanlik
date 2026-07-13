@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth";
 import { submitReport } from "@/lib/reports";
 import { CATEGORIES } from "@/lib/categories";
@@ -80,11 +81,13 @@ export async function createReportAction(input: {
         message: "Çok sık paylaşım yapıyorsunuz. Lütfen birkaç dakika sonra tekrar deneyin.",
       };
     case "merged":
+      revalidatePath("/");
       return {
         status: "success",
         message: "Bu olay zaten bildirilmişti, mevcut bildirime teyidiniz eklendi.",
       };
     case "created":
+      revalidatePath("/");
       return { status: "success", message: "Paylaşımınız haritaya eklendi." };
   }
 }

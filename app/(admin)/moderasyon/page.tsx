@@ -84,6 +84,7 @@ export default async function ModerasyonPage({
   const kategori = params.kategori && params.kategori !== "tumu" ? params.kategori : undefined;
   const durum = params.durum && params.durum !== "tumu" ? params.durum : undefined;
   const sirala = params.sirala ?? "yeni";
+  const now = new Date();
 
   const reports = await prisma.report.findMany({
     where: {
@@ -181,11 +182,18 @@ export default async function ModerasyonPage({
                 <span className="font-medium" style={{ color: category.color }}>
                   {category.icon} {category.label}
                 </span>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASS[r.status]}`}
-                >
-                  {STATUS_LABEL[r.status]}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {r.status === "ACTIVE" && r.expiresAt <= now && (
+                    <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-600">
+                      Süresi doldu
+                    </span>
+                  )}
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASS[r.status]}`}
+                  >
+                    {STATUS_LABEL[r.status]}
+                  </span>
+                </div>
               </div>
               <p className="mt-1 text-xs text-gray-500">
                 {r.author.fullName} · {r.createdAt.toLocaleString("tr-TR")}
