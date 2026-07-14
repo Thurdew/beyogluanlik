@@ -6,6 +6,7 @@ import { BEYOGLU_BOUNDARY } from "@/lib/geofence";
 import { SATELLITE_STYLE } from "@/lib/mapLayers";
 import { geocodeAddressAction } from "@/app/bildir/actions";
 import type { AddressResult } from "@/lib/geocoding";
+import { Icon } from "./icons";
 
 type MapContainer = HTMLDivElement & { __maplibreMap?: maplibregl.Map };
 const SEARCH_DEBOUNCE_MS = 400;
@@ -21,7 +22,9 @@ export function LocationPicker({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markerRef = useRef<maplibregl.Marker | null>(null);
   const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  });
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [query, setQuery] = useState("");
@@ -243,9 +246,10 @@ export function LocationPicker({
       <button
         type="button"
         onClick={useMyLocation}
-        className="absolute bottom-2 left-2 rounded-md bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow hover:bg-gray-50"
+        className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-md bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow hover:bg-gray-50"
       >
-        📍 Mevcut Konumum
+        <Icon name="locate-fixed" size={14} />
+        Mevcut Konumum
       </button>
     </div>
   );

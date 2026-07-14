@@ -4,6 +4,7 @@ import { useState } from "react";
 import { getCategory } from "@/lib/categories";
 import { timeAgo } from "@/lib/time";
 import type { MapReport } from "@/lib/reports";
+import { Icon, CloseIcon } from "./icons";
 
 export function EventSidebar({
   reports,
@@ -25,7 +26,8 @@ export function EventSidebar({
           aria-label="Olay listesini aç"
           className="fixed right-4 top-16 z-40 flex items-center gap-1.5 rounded-full bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-lg hover:bg-gray-50"
         >
-          📋 Olaylar ({reports.length})
+          <Icon name="list" size={16} />
+          Olaylar ({reports.length})
         </button>
       )}
 
@@ -53,7 +55,7 @@ export function EventSidebar({
             aria-label="Kapat"
             className="flex h-8 w-8 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700"
           >
-            ✕
+            <CloseIcon />
           </button>
         </div>
 
@@ -76,18 +78,20 @@ export function EventSidebar({
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span
-                          className="text-sm font-semibold"
+                          className="flex items-center gap-1.5 text-sm font-semibold"
                           style={{ color: category.color }}
                         >
-                          {category.icon} {category.label}
+                          <Icon name={category.iconName} size={16} />
+                          {category.label}
                         </span>
                         <span className="shrink-0 text-xs text-gray-400">
                           {timeAgo(report.createdAt)}
                         </span>
                       </div>
                       <p className="line-clamp-2 text-sm text-gray-700">{report.description}</p>
-                      <span className="text-xs text-gray-400">
-                        📍 {report.lat.toFixed(4)}, {report.lng.toFixed(4)}
+                      <span className="flex items-center gap-1 text-xs text-gray-400">
+                        <Icon name="map-pin" size={12} />
+                        {report.lat.toFixed(4)}, {report.lng.toFixed(4)}
                       </span>
                     </button>
                   </li>

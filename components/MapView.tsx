@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import { BEYOGLU_CENTER } from "@/lib/geofence";
-import { getCategory } from "@/lib/categories";
-import { clampInterpolate } from "@/lib/scale";
+import { CATEGORIES } from "@/lib/categories";
 import type { MapReport } from "@/lib/reports";
 import type { DutyPharmacy } from "@/lib/pharmacies";
+import { iconInner, iconSvgMarkup, Icon } from "./icons";
+import { MapLegend } from "./MapLegend";
 import {
-  addDistrictBoundary,
   loadMahalleLayer,
   getBeyogluBounds,
   getBeyogluMaxBounds,
@@ -19,34 +19,190 @@ import {
 
 type MapContainer = HTMLDivElement & { __maplibreMap?: maplibregl.Map };
 
-// Uzaktan (düşük zoom) bakarken olay ikonları büyük/belirgin olur; yaklaştıkça normal boyuta
-// döner ve kategori adı etiketi görünür hale gelir (detaylandırma). Vatandaş bildirimleri
-// haritadaki en önemli katman olduğu için eczane gibi referans katmanlarından belirgin şekilde
-// büyük tutulur ve z-index ile her zaman onların üstünde gösterilir.
-const REPORT_ICON_SIZE_FAR = 48;
-const REPORT_ICON_SIZE_NEAR = 30;
-const REPORT_LABEL_ZOOM_THRESHOLD = 14.5;
-const EMERGENCY_SIZE_MULTIPLIER = 1.3;
-const REPORT_MARKER_Z_INDEX = 20;
-const EMERGENCY_MARKER_Z_INDEX = 30;
-const SELECTED_MARKER_Z_INDEX = 40;
+// Seçili bir olaya odaklanırken haritanın ineceği asgari zoom.
 const SELECTED_FLYTO_MIN_ZOOM = 15.5;
 
-// Nöbetçi eczaneler resmi/statik bir katman olduğu için sabit boyutta gösterilir,
-// vatandaş bildirimlerinin aksine zoom'a göre ölçeklenmez. Olay pinleriyle karışmaması için
-// daha düşük bir z-index'te tutulur.
-const PHARMACY_ICON_SIZE = 42;
-const PHARMACY_MARKER_Z_INDEX = 10;
+// Nöbetçi eczaneler resmi/statik bir katman olduğu için DOM marker olarak, sabit boyutta gösterilir.
+const PHARMACY_PIN_SIZE = 40;
+const PHARMACY_COLOR = "#16a34a";
+
+// Olay pin'leri: kümeleme (clustering) için GeoJSON symbol layer kullanılır; kategori teardrop'ları
+// harita görseline (map image) rasterize edilir. 2x pixelRatio ile keskin kalır.
+const PIN_IMG_W = 80;
+const PIN_IMG_H = 90;
+const CLUSTER_COLOR = "#2563eb";
+
+// Kategori renginde damla (teardrop) + içinde beyaz Lucide glyph. DOM (innerHTML) için.
+function pinMarkup(color: string, iconName: string): string {
+  return `<svg viewBox="0 0 24 34" width="100%" xmlns="http://www.w3.org/2000/svg" style="display:block; overflow:visible;">
+    <path d="M12 1C6.2 1 1.5 5.7 1.5 11.5c0 7.9 10.5 21.5 10.5 21.5s10.5-13.6 10.5-21.5C22.5 5.7 17.8 1 12 1z" fill="${color}" stroke="#ffffff" stroke-width="1.3"/>
+    <g transform="translate(5.16 4.66) scale(0.57)" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">${iconInner(iconName)}</g>
+  </svg>`;
+}
+
+// Aynı teardrop, harita görseli olarak — gölge CSS filtresi map image'a uygulanamadığı için
+// SVG feDropShadow ile gömülür; viewBox gölgeye pay bırakacak şekilde genişletilir.
+function pinImageSvg(color: string, iconName: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${PIN_IMG_W}" height="${PIN_IMG_H}" viewBox="-4 -3 32 36">
+    <defs><filter id="sh" x="-50%" y="-30%" width="200%" height="170%">
+      <feDropShadow dx="0" dy="1.4" stdDeviation="1.4" flood-color="#000000" flood-opacity="0.4"/>
+    </filter></defs>
+    <g filter="url(#sh)">
+      <path d="M12 1C6.2 1 1.5 5.7 1.5 11.5c0 7.9 10.5 21.5 10.5 21.5s10.5-13.6 10.5-21.5C22.5 5.7 17.8 1 12 1z" fill="${color}" stroke="#ffffff" stroke-width="1.3"/>
+      <g transform="translate(5.16 4.66) scale(0.57)" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">${iconInner(iconName)}</g>
+    </g>
+  </svg>`;
+}
+
+function loadImageEl(svg: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  });
+}
+
+// Her kategori için teardrop görselini "cat-<slug>" adıyla haritaya kaydeder.
+async function registerCategoryImages(map: maplibregl.Map) {
+  await Promise.all(
+    CATEGORIES.map(async (c) => {
+      const id = `cat-${c.slug}`;
+      if (map.hasImage(id)) return;
+      const img = await loadImageEl(pinImageSvg(c.color, c.iconName));
+      if (!map.hasImage(id)) map.addImage(id, img, { pixelRatio: 2 });
+    }),
+  );
+}
+
+function reportsToFeatureCollection(reports: MapReport[]): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: reports.map((r) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [r.lng, r.lat] },
+      properties: { id: r.id, category: r.category },
+    })),
+  };
+}
+
+// Olay kaynağını (kümeli) ve katmanlarını kurar: küme baloncuğu + "+N" sayaç + tekil pin'ler.
+async function setupReportClusterLayers(
+  map: maplibregl.Map,
+  onSelect: { current: (id: string) => void },
+) {
+  await registerCategoryImages(map);
+
+  map.addSource("reports", {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+    cluster: true,
+    clusterRadius: 48,
+    clusterMaxZoom: 16,
+  });
+
+  map.addLayer({
+    id: "clusters",
+    type: "circle",
+    source: "reports",
+    filter: ["has", "point_count"],
+    paint: {
+      "circle-color": CLUSTER_COLOR,
+      "circle-opacity": 0.95,
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 2.5,
+      "circle-radius": ["step", ["get", "point_count"], 16, 5, 20, 15, 26],
+    },
+  });
+
+  map.addLayer({
+    id: "cluster-count",
+    type: "symbol",
+    source: "reports",
+    filter: ["has", "point_count"],
+    layout: {
+      "text-field": ["concat", "+", ["get", "point_count_abbreviated"]],
+      "text-font": ["Noto Sans Bold"],
+      "text-size": 13,
+      "text-allow-overlap": true,
+      "text-ignore-placement": true,
+    },
+    paint: { "text-color": "#ffffff" },
+  });
+
+  // Seçili olayı vurgulayan halka: tek noktalı "selected-report" kaynağı; pin'lerin altında çizilir.
+  map.addSource("selected-report", {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+  map.addLayer({
+    id: "selected-halo",
+    type: "circle",
+    source: "selected-report",
+    paint: {
+      "circle-radius": 24,
+      "circle-color": CLUSTER_COLOR,
+      "circle-opacity": 0.15,
+      "circle-stroke-color": CLUSTER_COLOR,
+      "circle-stroke-width": 3,
+      "circle-stroke-opacity": 0.9,
+    },
+  });
+
+  map.addLayer({
+    id: "unclustered",
+    type: "symbol",
+    source: "reports",
+    filter: ["!", ["has", "point_count"]],
+    layout: {
+      "icon-image": ["concat", "cat-", ["get", "category"]],
+      "icon-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        MAP_MIN_ZOOM,
+        0.9,
+        MAP_MAX_ZOOM,
+        1.2,
+      ],
+      "icon-anchor": "bottom",
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+    },
+  });
+
+  // Kümeye tıkla → yaklaşıp dağıt.
+  map.on("click", "clusters", (e) => {
+    const features = map.queryRenderedFeatures(e.point, { layers: ["clusters"] });
+    const clusterId = features[0]?.properties?.cluster_id;
+    if (clusterId == null) return;
+    const src = map.getSource("reports") as maplibregl.GeoJSONSource;
+    src.getClusterExpansionZoom(clusterId).then((zoom) => {
+      const geom = features[0].geometry as GeoJSON.Point;
+      map.easeTo({ center: geom.coordinates as [number, number], zoom });
+    });
+  });
+
+  // Tekil pin'e tıkla → detay modalını aç.
+  map.on("click", "unclustered", (e) => {
+    const id = e.features?.[0]?.properties?.id;
+    if (typeof id === "string") onSelect.current(id);
+  });
+
+  for (const layer of ["clusters", "unclustered"]) {
+    map.on("mouseenter", layer, () => {
+      map.getCanvas().style.cursor = "pointer";
+    });
+    map.on("mouseleave", layer, () => {
+      map.getCanvas().style.cursor = "";
+    });
+  }
+}
 
 function createPharmacyMarkerElement() {
   const el = document.createElement("div");
-  el.style.cssText =
-    "font-size:" +
-    PHARMACY_ICON_SIZE +
-    "px; line-height:1; cursor:pointer; z-index:" +
-    PHARMACY_MARKER_Z_INDEX +
-    "; filter:drop-shadow(0 1px 3px rgba(0,0,0,0.45));";
-  el.textContent = "💊";
+  el.style.cssText = `width:${PHARMACY_PIN_SIZE}px; cursor:pointer; filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4));`;
+  el.innerHTML = pinMarkup(PHARMACY_COLOR, "cross");
   return el;
 }
 
@@ -69,8 +225,15 @@ function createPharmacyPopupElement(pharmacy: DutyPharmacy) {
   el.style.cssText = "font-family: sans-serif; font-size: 16px; max-width: 280px;";
 
   const nameEl = document.createElement("div");
-  nameEl.style.cssText = "font-weight:700; font-size:18px; margin-bottom:6px;";
-  nameEl.textContent = `💊 ${pharmacy.name}`;
+  nameEl.style.cssText =
+    "display:flex; align-items:center; gap:6px; font-weight:700; font-size:18px; margin-bottom:6px;";
+  const nameIcon = document.createElement("span");
+  nameIcon.style.cssText = `color:${PHARMACY_COLOR}; display:inline-flex; flex-shrink:0;`;
+  nameIcon.innerHTML = iconSvgMarkup("cross", { size: 18 });
+  const nameText = document.createElement("span");
+  nameText.textContent = pharmacy.name;
+  nameEl.appendChild(nameIcon);
+  nameEl.appendChild(nameText);
   el.appendChild(nameEl);
 
   const addressLink = document.createElement("a");
@@ -91,97 +254,6 @@ function createPharmacyPopupElement(pharmacy: DutyPharmacy) {
   return el;
 }
 
-function createReportMarkerElement(categoryLabel: string, icon: string, categoryColor: string, isEmergency: boolean) {
-  const wrapper = document.createElement("div");
-  wrapper.style.cssText =
-    "display:flex; flex-direction:column; align-items:center; cursor:pointer; z-index:" +
-    (isEmergency ? EMERGENCY_MARKER_Z_INDEX : REPORT_MARKER_Z_INDEX) +
-    ";";
-
-  // İkon + (varsa) acil durum pulse halkası aynı konteynerde konumlanır ki halka ikonun tam
-  // ortasında büyüyüp sönsün.
-  const iconContainer = document.createElement("div");
-  iconContainer.style.cssText = "position:relative; display:flex; align-items:center; justify-content:center;";
-
-  let pulseEl: HTMLDivElement | null = null;
-  if (isEmergency) {
-    pulseEl = document.createElement("div");
-    pulseEl.className = "report-pulse-ring";
-    iconContainer.appendChild(pulseEl);
-  }
-
-  // Sağ paneldeki/haritadaki bir olay seçildiğinde etrafında beliren mavi seçim halkası;
-  // acil durum pulse halkasından ayırt edilsin diye farklı renk/animasyon kullanır.
-  const selectionRingEl = document.createElement("div");
-  selectionRingEl.className = "report-selection-ring";
-  selectionRingEl.style.display = "none";
-  iconContainer.appendChild(selectionRingEl);
-
-  const iconEl = document.createElement("div");
-  iconEl.textContent = icon;
-  iconEl.style.cssText = `position:relative; font-size:${REPORT_ICON_SIZE_FAR}px; line-height:1; filter:drop-shadow(0 1px 3px rgba(0,0,0,0.5));`;
-  iconContainer.appendChild(iconEl);
-  wrapper.appendChild(iconContainer);
-
-  const labelEl = document.createElement("div");
-  labelEl.textContent = categoryLabel;
-  labelEl.style.cssText =
-    `margin-top:2px; background:${categoryColor}; color:#fff; font-size:11px; font-weight:700;` +
-    " padding:2px 7px; border-radius:5px; white-space:nowrap; display:none;" +
-    " box-shadow:0 1px 3px rgba(0,0,0,0.35);";
-  wrapper.appendChild(labelEl);
-
-  return { wrapper, iconEl, labelEl, pulseEl, selectionRingEl };
-}
-
-type ReportScaleEntry = {
-  iconEl: HTMLElement;
-  labelEl: HTMLElement;
-  pulseEl: HTMLElement | null;
-  selectionRingEl: HTMLElement;
-  isEmergency: boolean;
-};
-
-function applyReportIconScale(map: maplibregl.Map, entries: ReportScaleEntry[]) {
-  const zoom = map.getZoom();
-  const baseSize = clampInterpolate(
-    zoom,
-    MAP_MIN_ZOOM,
-    MAP_MAX_ZOOM,
-    REPORT_ICON_SIZE_FAR,
-    REPORT_ICON_SIZE_NEAR,
-  );
-  const showLabel = zoom >= REPORT_LABEL_ZOOM_THRESHOLD;
-  for (const { iconEl, labelEl, pulseEl, selectionRingEl, isEmergency } of entries) {
-    const size = isEmergency ? baseSize * EMERGENCY_SIZE_MULTIPLIER : baseSize;
-    iconEl.style.fontSize = `${size}px`;
-    labelEl.style.display = showLabel ? "block" : "none";
-    if (pulseEl) {
-      const ringSize = size * 1.2;
-      pulseEl.style.width = `${ringSize}px`;
-      pulseEl.style.height = `${ringSize}px`;
-    }
-    const selectionRingSize = size * 1.7;
-    selectionRingEl.style.width = `${selectionRingSize}px`;
-    selectionRingEl.style.height = `${selectionRingSize}px`;
-  }
-}
-
-/** Bir olay pinini seçili/seçili-değil olarak işaretler: mavi seçim halkası + öne çıkan z-index. */
-function setReportMarkerSelected(
-  entry: { wrapper: HTMLElement; selectionRingEl: HTMLElement; isEmergency: boolean },
-  selected: boolean,
-) {
-  entry.selectionRingEl.style.display = selected ? "block" : "none";
-  entry.wrapper.style.zIndex = String(
-    selected
-      ? SELECTED_MARKER_Z_INDEX
-      : entry.isEmergency
-        ? EMERGENCY_MARKER_Z_INDEX
-        : REPORT_MARKER_Z_INDEX,
-  );
-}
-
 export function MapView({
   reports,
   pharmacies,
@@ -196,18 +268,30 @@ export function MapView({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const mahalleMarkersRef = useRef<maplibregl.Marker[]>([]);
-  const reportEntriesRef = useRef<
-    Map<string, { wrapper: HTMLElement; selectionRingEl: HTMLElement; isEmergency: boolean; lat: number; lng: number }>
-  >(new Map());
+  const onSelectRef = useRef(onSelectReport);
+  useEffect(() => {
+    onSelectRef.current = onSelectReport;
+  });
   const previousSelectedIdRef = useRef<string | null>(null);
   const currentLocationMarkerRef = useRef<maplibregl.Marker | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  // Aktif (görünür) kategoriler — lejant filtresi. Varsayılan: hepsi açık.
+  const [activeCats, setActiveCats] = useState<Set<string>>(
+    () => new Set(CATEGORIES.map((c) => c.slug)),
+  );
+  const toggleCat = (slug: string) =>
+    setActiveCats((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+  const resetCats = () => setActiveCats(new Set(CATEGORIES.map((c) => c.slug)));
 
   // Container'ın gerçek bir boyuta ulaşmasını bekleyip haritayı ancak o zaman kuruyoruz;
   // 0x0 boyutlu bir container'da oluşturulan MapLibre haritası tile isteklerini hiç tetiklemiyor.
-  // Harita instance'ı container DOM elemanına bağlanır (__maplibreMap): React'in geliştirme
-  // modunda efekti iki kez çalıştırması (StrictMode) aynı container için iki harita
-  // oluşturulmasına yol açabiliyordu; bu guard bunu engeller.
+  // Harita instance'ı container DOM elemanına bağlanır (__maplibreMap): StrictMode'da efektin iki
+  // kez çalışması aynı container için iki harita oluşmasına yol açabiliyordu; bu guard engeller.
   useEffect(() => {
     const container = containerRef.current as MapContainer | null;
     if (!container) return;
@@ -230,13 +314,22 @@ export function MapView({
 
       map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-right");
 
-      map.on("load", () => {
-        addDistrictBoundary(map);
+      map.on("load", async () => {
         map.fitBounds(getBeyogluBounds(), { padding: 32, duration: 0 });
 
-        loadMahalleLayer(map, mahalleMarkersRef.current).catch(() => {
-          // mahalle verisi opsiyonel; yüklenemezse harita ilçe sınırıyla çalışmaya devam eder
-        });
+        try {
+          // Mahalle/sınır katmanları önce (mask altta kalsın); olay pin'leri üstünde.
+          await loadMahalleLayer(map, mahalleMarkersRef.current);
+        } catch {
+          // mahalle verisi opsiyonel; yüklenemezse harita çalışmaya devam eder
+        }
+        if (cancelled) return;
+        try {
+          await setupReportClusterLayers(map, onSelectRef);
+        } catch {
+          // görseller/katmanlar kurulamazsa harita yine de gösterilir
+        }
+        if (cancelled) return;
 
         mapRef.current = map;
         setMapReady(true);
@@ -270,86 +363,51 @@ export function MapView({
     };
   }, []);
 
+  // Raporlar/filtre değişince kümeli kaynağın verisini güncelle (DOM marker yeniden kurmak yerine).
+  // Gizli kategoriler kaynaktan düşürülür → kümeler de yeniden hesaplanır.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
+    const src = map.getSource("reports") as maplibregl.GeoJSONSource | undefined;
+    const visible = reports.filter((r) => activeCats.has(r.category));
+    src?.setData(reportsToFeatureCollection(visible));
+  }, [reports, mapReady, activeCats]);
 
-    const markers: maplibregl.Marker[] = [];
-    const scaleEntries: ReportScaleEntry[] = [];
-    const entryMap = new Map<
-      string,
-      { wrapper: HTMLElement; selectionRingEl: HTMLElement; isEmergency: boolean; lat: number; lng: number }
-    >();
+  // Seçili olay: haritada halka ile vurgulanır (selected-report kaynağı) + o konuma flyTo.
+  // Kümeleme mimarisinde DOM marker yerine tek noktalı bir kaynak/halka katmanı kullanılır.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const src = map.getSource("selected-report") as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
 
-    reports.forEach((report) => {
-      const category = getCategory(report.category);
-      const { wrapper, iconEl, labelEl, pulseEl, selectionRingEl } = createReportMarkerElement(
-        category.label,
-        category.icon,
-        category.color,
-        category.isEmergency,
-      );
-      scaleEntries.push({ iconEl, labelEl, pulseEl, selectionRingEl, isEmergency: category.isEmergency });
-      wrapper.addEventListener("click", () => onSelectReport(report.id));
+    const selected = selectedReportId
+      ? reports.find((r) => r.id === selectedReportId && activeCats.has(r.category))
+      : undefined;
 
-      const marker = new maplibregl.Marker({ element: wrapper })
-        .setLngLat([report.lng, report.lat])
-        .addTo(map);
-
-      markers.push(marker);
-      entryMap.set(report.id, {
-        wrapper,
-        selectionRingEl,
-        isEmergency: category.isEmergency,
-        lat: report.lat,
-        lng: report.lng,
-      });
+    src.setData({
+      type: "FeatureCollection",
+      features: selected
+        ? [
+            {
+              type: "Feature",
+              geometry: { type: "Point", coordinates: [selected.lng, selected.lat] },
+              properties: {},
+            },
+          ]
+        : [],
     });
 
-    reportEntriesRef.current = entryMap;
-    applyReportIconScale(map, scaleEntries);
-    const onZoom = () => applyReportIconScale(map, scaleEntries);
-    map.on("zoom", onZoom);
-
-    // Yeni marker seti oluşturulduğunda, hâlâ geçerliyse mevcut seçim vurgusunu koru (ör. reports
-    // prop'u tazelendiğinde seçili pin görünürlüğünü kaybetmesin).
-    if (selectedReportId) {
-      const selectedEntry = entryMap.get(selectedReportId);
-      if (selectedEntry) setReportMarkerSelected(selectedEntry, true);
+    // flyTo yalnızca seçim gerçekten değiştiğinde tetiklenir (filtre/prop tazelemesinde değil).
+    if (selected && previousSelectedIdRef.current !== selectedReportId) {
+      map.flyTo({
+        center: [selected.lng, selected.lat],
+        zoom: Math.max(map.getZoom(), SELECTED_FLYTO_MIN_ZOOM),
+        essential: true,
+      });
     }
-
-    return () => {
-      map.off("zoom", onZoom);
-      markers.forEach((m) => m.remove());
-      reportEntriesRef.current = new Map();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reports, mapReady, onSelectReport]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapReady) return;
-
-    const previousId = previousSelectedIdRef.current;
-    if (previousId && previousId !== selectedReportId) {
-      const previousEntry = reportEntriesRef.current.get(previousId);
-      if (previousEntry) setReportMarkerSelected(previousEntry, false);
-    }
-
-    if (selectedReportId) {
-      const entry = reportEntriesRef.current.get(selectedReportId);
-      if (entry) {
-        setReportMarkerSelected(entry, true);
-        map.flyTo({
-          center: [entry.lng, entry.lat],
-          zoom: Math.max(map.getZoom(), SELECTED_FLYTO_MIN_ZOOM),
-          essential: true,
-        });
-      }
-    }
-
     previousSelectedIdRef.current = selectedReportId;
-  }, [selectedReportId, mapReady]);
+  }, [selectedReportId, mapReady, reports, activeCats]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -358,10 +416,13 @@ export function MapView({
     const markers: maplibregl.Marker[] = [];
 
     pharmacies.forEach((pharmacy) => {
-      const popup = new maplibregl.Popup({ offset: 20, maxWidth: "300px" }).setDOMContent(
+      const popup = new maplibregl.Popup({ offset: 46, maxWidth: "300px" }).setDOMContent(
         createPharmacyPopupElement(pharmacy),
       );
-      const marker = new maplibregl.Marker({ element: createPharmacyMarkerElement() })
+      const marker = new maplibregl.Marker({
+        element: createPharmacyMarkerElement(),
+        anchor: "bottom",
+      })
         .setLngLat([pharmacy.lng, pharmacy.lat])
         .setPopup(popup)
         .addTo(map);
@@ -392,18 +453,35 @@ export function MapView({
     });
   }
 
+  // Görünür (filtre sonrası) olay sayısı — boş durum mesajı için.
+  const visibleCount = reports.reduce((n, r) => n + (activeCats.has(r.category) ? 1 : 0), 0);
+
   return (
-    <>
+    // Wrapper flex-col: harita container'ı yüksekliği flex-1 (flex-grow) ile alır — maplibre
+    // container'a position:relative dayattığı için yüzde-yükseklik (h-full) çözülmüyordu.
+    // Lejant ve butonlar relative wrapper'a göre absolute konumlanır.
+    <div className="relative flex w-full flex-1 flex-col">
       <div ref={containerRef} className="w-full flex-1" />
+      {mapReady && <MapLegend active={activeCats} onToggle={toggleCat} onReset={resetCats} />}
       <button
         type="button"
         onClick={handleLocateMe}
         aria-label="Şu anki konumumu göster"
         title="Şu anki konumumu göster"
-        className="absolute bottom-6 left-4 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white text-lg shadow-lg hover:bg-gray-50"
+        className="absolute bottom-6 left-4 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white text-gray-700 shadow-lg hover:bg-gray-50"
       >
-        📍
+        <Icon name="locate-fixed" size={20} />
       </button>
-    </>
+      {mapReady && visibleCount === 0 && (
+        <div className="pointer-events-none absolute left-1/2 top-4 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-white/95 px-4 py-2 text-sm font-medium text-gray-600 shadow-lg ring-1 ring-black/5 backdrop-blur">
+          <Icon name="info" size={16} className="text-gray-400" />
+          <span>
+            {reports.length === 0
+              ? "Şu an aktif olay yok"
+              : "Seçili türlerde olay yok"}
+          </span>
+        </div>
+      )}
+    </div>
   );
 }

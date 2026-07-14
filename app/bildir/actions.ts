@@ -15,6 +15,13 @@ export type SubmitState =
   | { status: "success"; message: string };
 
 const MAX_PHOTO_SIZE = 5 * 1024 * 1024;
+// Yalnızca güvenli raster formatları. SVG bilerek dışarıda: aynı origin'den servis edilen
+// SVG gömülü script çalıştırabildiği için stored-XSS riski taşır.
+const ALLOWED_PHOTO_TYPES: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
 
 export type UploadPhotoResult = { url: string } | { error: string };
 
@@ -26,14 +33,14 @@ export async function uploadPhotoAction(formData: FormData): Promise<UploadPhoto
   if (!(file instanceof File) || file.size === 0) {
     return { error: "Dosya bulunamadı." };
   }
-  if (!file.type.startsWith("image/")) {
-    return { error: "Yalnızca görsel dosyaları yükleyebilirsiniz." };
+  const extension = ALLOWED_PHOTO_TYPES[file.type];
+  if (!extension) {
+    return { error: "Yalnızca JPG, PNG veya WebP görselleri yükleyebilirsiniz." };
   }
   if (file.size > MAX_PHOTO_SIZE) {
     return { error: "Dosya boyutu 5 MB'tan küçük olmalı." };
   }
 
-  const extension = file.type.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
   const filename = `${randomUUID()}.${extension}`;
   const uploadsDir = path.join(process.cwd(), "public", "uploads");
   await mkdir(uploadsDir, { recursive: true });

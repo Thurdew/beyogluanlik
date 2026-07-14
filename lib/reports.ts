@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { isWithinBeyoglu } from "./geofence";
+import { isWithinBeyogluStrict } from "./geofenceServer";
 import { haversineMeters } from "./distance";
 
 const REPORT_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -58,14 +58,21 @@ export type ReportComment = {
 export type ReportDetail = MapReport & {
   status: "ACTIVE" | "UNDER_REVIEW" | "REMOVED";
   comments: ReportComment[];
+  /** Giriş yapan kullanıcının bu rapora verdiği oy (yoksa null). */
+  myVote: "TRUE" | "FALSE" | null;
+  /** Rapor giriş yapan kullanıcıya mı ait (kendi raporuna oy verilemez). */
+  isOwn: boolean;
 };
 
-export async function getReportDetail(reportId: string): Promise<ReportDetail | null> {
+export async function getReportDetail(
+  reportId: string,
+  currentUserId?: string,
+): Promise<ReportDetail | null> {
   const report = await prisma.report.findUnique({
     where: { id: reportId },
     include: {
       author: { select: { fullName: true } },
-      confirmations: { select: { type: true } },
+      confirmations: { select: { type: true, userId: true } },
       comments: {
         include: { author: { select: { fullName: true } } },
         orderBy: { createdAt: "asc" },
@@ -74,6 +81,10 @@ export async function getReportDetail(reportId: string): Promise<ReportDetail | 
   });
 
   if (!report) return null;
+
+  const myConfirmation = currentUserId
+    ? report.confirmations.find((c) => c.userId === currentUserId)
+    : undefined;
 
   return {
     id: report.id,
@@ -87,6 +98,8 @@ export async function getReportDetail(reportId: string): Promise<ReportDetail | 
     trueCount: report.confirmations.filter((c) => c.type === "TRUE").length,
     falseCount: report.confirmations.filter((c) => c.type === "FALSE").length,
     authorName: report.author.fullName,
+    myVote: (myConfirmation?.type as "TRUE" | "FALSE" | undefined) ?? null,
+    isOwn: currentUserId != null && report.authorId === currentUserId,
     comments: report.comments.map((c) => ({
       id: c.id,
       text: c.text,
@@ -116,7 +129,7 @@ export type SubmitReportResult =
 // tek bir akışta uygulanır: aynı kategori + yakın konum + son 30 dakika içindeki mevcut bir Report varsa
 // yeni pin açmak yerine o Report'a teyit eklenir.
 export async function submitReport(input: CreateReportInput): Promise<SubmitReportResult> {
-  if (!isWithinBeyoglu(input.lat, input.lng)) {
+  if (!(await isWithinBeyogluStrict(input.lat, input.lng))) {
     return { kind: "outside_geofence" };
   }
 

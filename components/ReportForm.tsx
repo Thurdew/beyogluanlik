@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CATEGORIES, getCategory } from "@/lib/categories";
 import { BEYOGLU_CENTER } from "@/lib/geofence";
+import { Icon } from "./icons";
 import { LocationPicker } from "./LocationPicker";
 import { createReportAction, uploadPhotoAction } from "@/app/bildir/actions";
 
@@ -96,16 +97,33 @@ export function ReportForm() {
               key={c.slug}
               type="button"
               onClick={() => setCategory(c.slug)}
-              className={`rounded-md border px-3 py-2 text-sm ${
+              className={`flex items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm ${
                 category === c.slug
                   ? "border-blue-600 bg-blue-50 text-blue-700"
                   : "border-gray-300 text-gray-700 hover:bg-gray-50"
               }`}
             >
-              {c.icon} {c.label}
+              <span className="flex shrink-0" style={{ color: c.color }}>
+                <Icon name={c.iconName} size={16} />
+              </span>
+              {c.label}
             </button>
           ))}
         </div>
+        {selectedCategory.isEmergency && (
+          <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <span className="mt-0.5 flex shrink-0">
+              <Icon name="triangle-alert" size={16} />
+            </span>
+            <span>
+              Hayati tehlike varsa bu uygulama yerine hemen{" "}
+              <a href="tel:112" className="font-semibold underline">
+                112&apos;yi arayın
+              </a>
+              . Buradaki paylaşım resmi ihbar yerine geçmez.
+            </span>
+          </div>
+        )}
       </div>
 
       <div>
@@ -170,7 +188,8 @@ export function ReportForm() {
             disabled={isUploadingPhoto}
             className="mt-2 flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
-            📷 {isUploadingPhoto ? "Yükleniyor..." : "Fotoğraf Seç"}
+            <Icon name="camera" size={16} />
+            {isUploadingPhoto ? "Yükleniyor..." : "Fotoğraf Seç"}
           </button>
         )}
 

@@ -46,8 +46,13 @@ export async function getDutyPharmacies(): Promise<DutyPharmacy[]> {
 
   if (!res.ok) return [];
 
-  const data: CollectApiResponse = await res.json();
-  if (!data.success) return [];
+  let data: CollectApiResponse;
+  try {
+    data = await res.json();
+  } catch {
+    return [];
+  }
+  if (!data.success || !Array.isArray(data.result)) return [];
 
   const pharmacies: DutyPharmacy[] = [];
   for (const p of data.result) {

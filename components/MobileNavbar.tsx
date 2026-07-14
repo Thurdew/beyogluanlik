@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { logoutAction } from "@/app/giris/actions";
-import { LogoMark, LogoutIcon, MenuIcon, CloseIcon } from "./icons";
+import { Icon, LogoMark, LogoutIcon, MenuIcon, CloseIcon } from "./icons";
 
 function initials(name: string) {
   return name
@@ -105,8 +105,8 @@ export function MobileNavbar({ user }: { user: NavbarUser | null }) {
                   </span>
                   <div className="flex flex-col leading-none">
                     <span className="text-sm font-semibold text-gray-900">{user.fullName}</span>
-                    <span className="mt-1 text-xs font-medium text-amber-600">
-                      ⭐ {user.trustScore} puan
+                    <span className="mt-1 flex items-center gap-1 text-xs font-medium text-amber-600">
+                      <Icon name="star" size={12} /> {user.trustScore} puan
                     </span>
                   </div>
                 </div>

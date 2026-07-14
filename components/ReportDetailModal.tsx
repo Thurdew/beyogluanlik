@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getCategory } from "@/lib/categories";
 import { timeAgo } from "@/lib/time";
+import { Icon, CloseIcon } from "./icons";
 import type { ReportDetail } from "@/lib/reports";
 import { confirmReportAction } from "@/app/actions";
 import { fetchReportDetailAction, addCommentAction } from "@/app/actions";
@@ -35,9 +36,19 @@ export function ReportDetailModal({
     setLoading(false);
   }
 
+  // Modal parent'ta key={reportId} ile mount edildiği için her açılışta loading=true taze başlar;
+  // burada senkron setState'e gerek yok. Cancel guard: modal kapanınca yarım fetch eski veriyle
+  // setState yapmasın.
   useEffect(() => {
-    loadDetail();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    fetchReportDetailAction(reportId).then((data) => {
+      if (cancelled) return;
+      setDetail(data);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [reportId]);
 
   async function handleVote(type: "TRUE" | "FALSE") {
@@ -97,17 +108,44 @@ export function ReportDetailModal({
         onClick={(e) => e.stopPropagation()}
       >
         {loading || !detail || !category ? (
-          <div className="flex h-64 items-center justify-center text-sm text-gray-500">
-            Yükleniyor...
+          <div className="animate-pulse">
+            <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+              <div className="flex items-center gap-2">
+                <div className="h-5 w-5 rounded bg-gray-200" />
+                <div className="h-5 w-32 rounded bg-gray-200" />
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Kapat"
+                className="flex h-8 w-8 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+            <div className="px-5 py-4">
+              <div className="space-y-2">
+                <div className="h-4 w-full rounded bg-gray-200" />
+                <div className="h-4 w-11/12 rounded bg-gray-200" />
+                <div className="h-4 w-3/5 rounded bg-gray-200" />
+              </div>
+              <div className="mt-3 h-3 w-40 rounded bg-gray-100" />
+              <div className="mt-4 flex gap-2">
+                <div className="h-9 flex-1 rounded-lg bg-gray-200" />
+                <div className="h-9 flex-1 rounded-lg bg-gray-200" />
+              </div>
+              <div className="mt-6 h-4 w-28 rounded bg-gray-200" />
+            </div>
           </div>
         ) : (
           <>
             <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
               <span
-                className="text-lg font-bold"
+                className="flex items-center gap-2 text-lg font-bold"
                 style={{ color: category.color }}
               >
-                {category.icon} {category.label}
+                <Icon name={category.iconName} size={20} />
+                {category.label}
               </span>
               <button
                 type="button"
@@ -115,7 +153,7 @@ export function ReportDetailModal({
                 aria-label="Kapat"
                 className="flex h-8 w-8 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700"
               >
-                ✕
+                <CloseIcon />
               </button>
             </div>
 
@@ -134,24 +172,60 @@ export function ReportDetailModal({
                 {timeAgo(detail.createdAt)} · {detail.authorName}
               </p>
 
-              <div className="mt-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleVote("TRUE")}
-                  disabled={isVoting}
-                  className="flex-1 rounded-lg border border-green-600 py-2 text-sm font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
-                >
-                  ✅ Doğru ({detail.trueCount})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleVote("FALSE")}
-                  disabled={isVoting}
-                  className="flex-1 rounded-lg border border-red-600 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-                >
-                  ⚠️ Asılsız ({detail.falseCount})
-                </button>
-              </div>
+              <p className="mt-3 flex items-start gap-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
+                <span className="mt-px flex shrink-0">
+                  <Icon name="info" size={13} />
+                </span>
+                Bu bir vatandaş bildirimidir, belediye tarafından doğrulanmamıştır.
+              </p>
+
+              {detail.isOwn ? (
+                <div className="mt-4 flex items-center gap-3 rounded-lg bg-gray-50 px-3 py-2.5 text-sm">
+                  <span className="flex items-center gap-1.5 font-medium text-green-700">
+                    <Icon name="circle-check" size={16} /> {detail.trueCount}
+                  </span>
+                  <span className="flex items-center gap-1.5 font-medium text-red-700">
+                    <Icon name="triangle-alert" size={16} /> {detail.falseCount}
+                  </span>
+                  <span className="ml-auto text-xs text-gray-400">Bu senin paylaşımın</span>
+                </div>
+              ) : (
+                <>
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleVote("TRUE")}
+                      disabled={isVoting}
+                      aria-pressed={detail.myVote === "TRUE"}
+                      className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-green-600 py-2 text-sm font-medium disabled:opacity-50 ${
+                        detail.myVote === "TRUE"
+                          ? "bg-green-600 text-white hover:bg-green-700"
+                          : "text-green-700 hover:bg-green-50"
+                      }`}
+                    >
+                      <Icon name="circle-check" size={18} /> Doğru ({detail.trueCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleVote("FALSE")}
+                      disabled={isVoting}
+                      aria-pressed={detail.myVote === "FALSE"}
+                      className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-red-600 py-2 text-sm font-medium disabled:opacity-50 ${
+                        detail.myVote === "FALSE"
+                          ? "bg-red-600 text-white hover:bg-red-700"
+                          : "text-red-700 hover:bg-red-50"
+                      }`}
+                    >
+                      <Icon name="triangle-alert" size={18} /> Asılsız ({detail.falseCount})
+                    </button>
+                  </div>
+                  {detail.myVote && (
+                    <p className="mt-1.5 text-center text-xs text-gray-400">
+                      Oyunu geri almak için tekrar dokun
+                    </p>
+                  )}
+                </>
+              )}
 
               <div className="mt-6 border-t border-gray-100 pt-4">
                 <h3 className="text-sm font-semibold text-gray-900">
@@ -228,9 +302,10 @@ export function ReportDetailModal({
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={isUploadingPhoto}
-                      className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                      className="flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                     >
-                      📷 {isUploadingPhoto ? "Yükleniyor..." : "Fotoğraf Ekle"}
+                      <Icon name="camera" size={14} />
+                      {isUploadingPhoto ? "Yükleniyor..." : "Fotoğraf Ekle"}
                     </button>
                     <button
                       type="button"

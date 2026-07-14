@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -45,3 +46,11 @@ next-env.d.ts
 # local dev files
 dev.db
 dev-server.log
+
+# kullanıcı yüklemeleri (runtime'da oluşur; kişisel veri içerebilir — repoya girmemeli)
+/public/uploads/
+
+# geliştirme sırasında alınan geçici önizleme görselleri
+/_*.png
+/*.PNG
+/öncesi.PNG

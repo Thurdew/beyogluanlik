@@ -17,7 +17,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
 }
 
 /* Acil kategori (yangın, kaza vb.) olay pinlerinin arkasında büyüyüp sönen kırmızı tehlike
