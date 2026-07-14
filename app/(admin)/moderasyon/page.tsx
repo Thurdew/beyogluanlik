@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getCategory, CATEGORIES } from "@/lib/categories";
+import { Icon } from "@/components/icons";
 import { isModeratorSession } from "@/lib/moderatorSession";
 import {
   approveReportAction,
@@ -81,15 +82,20 @@ export default async function ModerasyonPage({
     );
   }
 
+  const VALID_STATUSES = ["ACTIVE", "UNDER_REVIEW", "REMOVED"] as const;
   const kategori = params.kategori && params.kategori !== "tumu" ? params.kategori : undefined;
-  const durum = params.durum && params.durum !== "tumu" ? params.durum : undefined;
+  // Geçersiz bir ?durum=... değeri Prisma enum sorgusunu 500'e düşürebiliyor; beyaz listeye al.
+  const durum =
+    params.durum && (VALID_STATUSES as readonly string[]).includes(params.durum)
+      ? (params.durum as (typeof VALID_STATUSES)[number])
+      : undefined;
   const sirala = params.sirala ?? "yeni";
   const now = new Date();
 
   const reports = await prisma.report.findMany({
     where: {
       ...(kategori ? { category: kategori } : {}),
-      ...(durum ? { status: durum as "ACTIVE" | "UNDER_REVIEW" | "REMOVED" } : {}),
+      ...(durum ? { status: durum } : {}),
     },
     include: { author: true, confirmations: true },
     orderBy: { createdAt: "desc" },
@@ -133,7 +139,7 @@ export default async function ModerasyonPage({
           <option value="tumu">Tüm kategoriler</option>
           {CATEGORIES.map((c) => (
             <option key={c.slug} value={c.slug}>
-              {c.icon} {c.label}
+              {c.label}
             </option>
           ))}
         </select>
@@ -179,8 +185,12 @@ export default async function ModerasyonPage({
           return (
             <li key={r.id} className="rounded-lg border border-gray-200 bg-white p-4">
               <div className="flex items-center justify-between">
-                <span className="font-medium" style={{ color: category.color }}>
-                  {category.icon} {category.label}
+                <span
+                  className="flex items-center gap-1.5 font-medium"
+                  style={{ color: category.color }}
+                >
+                  <Icon name={category.iconName} size={16} />
+                  {category.label}
                 </span>
                 <div className="flex items-center gap-1.5">
                   {r.status === "ACTIVE" && r.expiresAt <= now && (
@@ -207,8 +217,13 @@ export default async function ModerasyonPage({
                   className="mt-2 h-32 w-full rounded-md border border-gray-200 object-cover"
                 />
               )}
-              <p className="mt-2 text-xs font-semibold text-gray-800">
-                ✅ {r.trueCount} doğru · ⚠️ {r.falseCount} asılsız
+              <p className="mt-2 flex items-center gap-3 text-xs font-semibold text-gray-800">
+                <span className="flex items-center gap-1 text-green-700">
+                  <Icon name="circle-check" size={14} /> {r.trueCount} doğru
+                </span>
+                <span className="flex items-center gap-1 text-red-700">
+                  <Icon name="triangle-alert" size={14} /> {r.falseCount} asılsız
+                </span>
               </p>
               <div className="mt-3 flex gap-2">
                 {r.status !== "ACTIVE" && (

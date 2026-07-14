@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { logoutAction } from "@/app/giris/actions";
-import { LogoMark, LogoutIcon } from "./icons";
+import { Icon, LogoMark, LogoutIcon } from "./icons";
 import { MobileNavbar } from "./MobileNavbar";
 
 function initials(name: string) {
@@ -45,8 +45,8 @@ export async function Header() {
                   <span className="truncate text-[13px] font-semibold text-gray-900">
                     {user.fullName}
                   </span>
-                  <span className="truncate text-[11px] font-medium text-amber-600">
-                    ⭐ {user.trustScore} puan
+                  <span className="flex items-center gap-1 truncate text-[11px] font-medium text-amber-600">
+                    <Icon name="star" size={12} /> {user.trustScore} puan
                   </span>
                 </span>
               </div>

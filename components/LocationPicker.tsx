@@ -2,7 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
-import { BEYOGLU_BOUNDARY } from "@/lib/geofence";
+import { fetchMahalleGeojson, addBeyogluRegionLayers } from "@/lib/mapLayers";
+import { Icon } from "./icons";
 
 type MapContainer = HTMLDivElement & { __maplibreMap?: maplibregl.Map };
 
@@ -17,7 +18,9 @@ export function LocationPicker({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markerRef = useRef<maplibregl.Marker | null>(null);
   const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  });
 
   // Harita instance'ı container DOM elemanına bağlanır (__maplibreMap): React'in geliştirme
   // modunda efekti iki kez çalıştırması (StrictMode) aynı container için iki harita
@@ -41,20 +44,11 @@ export function LocationPicker({
       map.addControl(new maplibregl.NavigationControl(), "top-right");
 
       map.on("load", () => {
-        map.addSource("beyoglu-sinir", {
-          type: "geojson",
-          data: {
-            type: "Feature",
-            properties: {},
-            geometry: { type: "Polygon", coordinates: [BEYOGLU_BOUNDARY] },
-          },
-        });
-        map.addLayer({
-          id: "beyoglu-sinir-line",
-          type: "line",
-          source: "beyoglu-sinir",
-          paint: { "line-color": "#2563eb", "line-width": 2, "line-dasharray": [2, 2] },
-        });
+        fetchMahalleGeojson()
+          .then((geojson) => addBeyogluRegionLayers(map, geojson))
+          .catch(() => {
+            // sınır katmanı opsiyonel; yüklenemezse harita çıplak çalışmaya devam eder
+          });
       });
 
       const marker = new maplibregl.Marker({ draggable: true, color: "#2563eb" })
@@ -114,9 +108,10 @@ export function LocationPicker({
       <button
         type="button"
         onClick={useMyLocation}
-        className="absolute bottom-2 left-2 rounded-md bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow hover:bg-gray-50"
+        className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-md bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow hover:bg-gray-50"
       >
-        📍 Mevcut Konumum
+        <Icon name="locate-fixed" size={14} />
+        Mevcut Konumum
       </button>
     </div>
   );
