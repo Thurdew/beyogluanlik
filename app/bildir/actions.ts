@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth";
 import { submitReport } from "@/lib/reports";
 import { CATEGORIES } from "@/lib/categories";
+import { searchAddress, type AddressResult } from "@/lib/geocoding";
 
 export type SubmitState =
   | { status: "error"; message: string }
@@ -40,6 +41,13 @@ export async function uploadPhotoAction(formData: FormData): Promise<UploadPhoto
   await writeFile(path.join(uploadsDir, filename), buffer);
 
   return { url: `/uploads/${filename}` };
+}
+
+export async function geocodeAddressAction(query: string): Promise<AddressResult[]> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/giris");
+
+  return searchAddress(query);
 }
 
 export async function createReportAction(input: {

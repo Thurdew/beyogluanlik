@@ -1,5 +1,3 @@
-import { isWithinBeyoglu } from "./geofence";
-
 const COLLECTAPI_URL = "https://api.collectapi.com/health/dutyPharmacy";
 const CACHE_SECONDS = 6 * 60 * 60;
 
@@ -57,9 +55,12 @@ export async function getDutyPharmacies(): Promise<DutyPharmacy[]> {
     const lat = Number(latStr);
     const lng = Number(lngStr);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-    // CollectAPI ilçe filtresi metin bazlı; döndürdüğü konum bazen Beyoğlu sınırları dışına
-    // düşebiliyor (ör. komşu ilçedeki bir eczane "BEYOĞLU" olarak etiketlenmiş olabilir).
-    if (!isWithinBeyoglu(lat, lng)) continue;
+    // Not: harita raporlarındaki geofence poligonu (isWithinBeyoglu) burada kasıtlı olarak
+    // kullanılmıyor — o poligon konum-sahteciliği kontrolü için elle çizilmiş kaba bir şekil
+    // olup gerçek ilçe sınırını temsil etmiyor; ör. Örnektepe/Kasımpaşa gibi Beyoğlu'nun uzak
+    // mahallelerindeki gerçek nöbetçi eczaneleri hatalı biçimde eliyordu. Bunun yerine
+    // CollectAPI'nin kendi ilçe alanına güveniyoruz (ilce=Beyoğlu parametresiyle zaten sorgulandı).
+    if (p.dist.trim().toLocaleUpperCase("tr").replace(/İ/g, "I") !== "BEYOĞLU".toLocaleUpperCase("tr").replace(/İ/g, "I")) continue;
     pharmacies.push({ name: p.name, address: p.address, phone: p.phone, district: p.dist, lat, lng });
   }
   return pharmacies;
