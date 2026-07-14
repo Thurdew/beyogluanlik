@@ -14,9 +14,13 @@ import {
   getBeyogluMaxBounds,
   MAP_MIN_ZOOM,
   MAP_MAX_ZOOM,
+  SATELLITE_STYLE,
 } from "@/lib/mapLayers";
 
 type MapContainer = HTMLDivElement & { __maplibreMap?: maplibregl.Map };
+
+// Seçili bir olaya odaklanırken haritanın ineceği asgari zoom.
+const SELECTED_FLYTO_MIN_ZOOM = 15.5;
 
 // Nöbetçi eczaneler resmi/statik bir katman olduğu için DOM marker olarak, sabit boyutta gösterilir.
 const PHARMACY_PIN_SIZE = 40;
@@ -126,6 +130,25 @@ async function setupReportClusterLayers(
     paint: { "text-color": "#ffffff" },
   });
 
+  // Seçili olayı vurgulayan halka: tek noktalı "selected-report" kaynağı; pin'lerin altında çizilir.
+  map.addSource("selected-report", {
+    type: "geojson",
+    data: { type: "FeatureCollection", features: [] },
+  });
+  map.addLayer({
+    id: "selected-halo",
+    type: "circle",
+    source: "selected-report",
+    paint: {
+      "circle-radius": 24,
+      "circle-color": CLUSTER_COLOR,
+      "circle-opacity": 0.15,
+      "circle-stroke-color": CLUSTER_COLOR,
+      "circle-stroke-width": 3,
+      "circle-stroke-opacity": 0.9,
+    },
+  });
+
   map.addLayer({
     id: "unclustered",
     type: "symbol",
@@ -183,6 +206,16 @@ function createPharmacyMarkerElement() {
   return el;
 }
 
+// Kullanıcının anlık konumunu gösteren mavi nokta; kategori/eczane pinleriyle karışmaması için
+// sade bir "buradasın" işareti olarak tasarlandı.
+function createCurrentLocationMarkerElement() {
+  const el = document.createElement("div");
+  el.style.cssText =
+    "width:18px; height:18px; border-radius:9999px; background:#2563eb;" +
+    " border:3px solid white; box-shadow:0 0 0 2px rgba(37,99,235,0.5), 0 1px 4px rgba(0,0,0,0.4);";
+  return el;
+}
+
 function googleMapsDirectionsUrl(pharmacy: DutyPharmacy) {
   return `https://www.google.com/maps/dir/?api=1&destination=${pharmacy.lat},${pharmacy.lng}`;
 }
@@ -225,10 +258,12 @@ export function MapView({
   reports,
   pharmacies,
   onSelectReport,
+  selectedReportId,
 }: {
   reports: MapReport[];
   pharmacies: DutyPharmacy[];
   onSelectReport: (reportId: string) => void;
+  selectedReportId: string | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -237,6 +272,8 @@ export function MapView({
   useEffect(() => {
     onSelectRef.current = onSelectReport;
   });
+  const previousSelectedIdRef = useRef<string | null>(null);
+  const currentLocationMarkerRef = useRef<maplibregl.Marker | null>(null);
   const [mapReady, setMapReady] = useState(false);
   // Aktif (görünür) kategoriler — lejant filtresi. Varsayılan: hepsi açık.
   const [activeCats, setActiveCats] = useState<Set<string>>(
@@ -266,7 +303,7 @@ export function MapView({
 
       const map = new maplibregl.Map({
         container,
-        style: "https://tiles.openfreemap.org/styles/liberty",
+        style: SATELLITE_STYLE,
         center: BEYOGLU_CENTER,
         zoom: 14,
         minZoom: MAP_MIN_ZOOM,
@@ -336,6 +373,42 @@ export function MapView({
     src?.setData(reportsToFeatureCollection(visible));
   }, [reports, mapReady, activeCats]);
 
+  // Seçili olay: haritada halka ile vurgulanır (selected-report kaynağı) + o konuma flyTo.
+  // Kümeleme mimarisinde DOM marker yerine tek noktalı bir kaynak/halka katmanı kullanılır.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const src = map.getSource("selected-report") as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+
+    const selected = selectedReportId
+      ? reports.find((r) => r.id === selectedReportId && activeCats.has(r.category))
+      : undefined;
+
+    src.setData({
+      type: "FeatureCollection",
+      features: selected
+        ? [
+            {
+              type: "Feature",
+              geometry: { type: "Point", coordinates: [selected.lng, selected.lat] },
+              properties: {},
+            },
+          ]
+        : [],
+    });
+
+    // flyTo yalnızca seçim gerçekten değiştiğinde tetiklenir (filtre/prop tazelemesinde değil).
+    if (selected && previousSelectedIdRef.current !== selectedReportId) {
+      map.flyTo({
+        center: [selected.lng, selected.lat],
+        zoom: Math.max(map.getZoom(), SELECTED_FLYTO_MIN_ZOOM),
+        essential: true,
+      });
+    }
+    previousSelectedIdRef.current = selectedReportId;
+  }, [selectedReportId, mapReady, reports, activeCats]);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
@@ -361,16 +434,44 @@ export function MapView({
     };
   }, [pharmacies, mapReady]);
 
+  function handleLocateMe() {
+    const map = mapRef.current;
+    if (!map || !navigator.geolocation) return;
+
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const { latitude, longitude } = pos.coords;
+      if (currentLocationMarkerRef.current) {
+        currentLocationMarkerRef.current.setLngLat([longitude, latitude]);
+      } else {
+        currentLocationMarkerRef.current = new maplibregl.Marker({
+          element: createCurrentLocationMarkerElement(),
+        })
+          .setLngLat([longitude, latitude])
+          .addTo(map);
+      }
+      map.flyTo({ center: [longitude, latitude], zoom: 16 });
+    });
+  }
+
   // Görünür (filtre sonrası) olay sayısı — boş durum mesajı için.
   const visibleCount = reports.reduce((n, r) => n + (activeCats.has(r.category) ? 1 : 0), 0);
 
   return (
     // Wrapper flex-col: harita container'ı yüksekliği flex-1 (flex-grow) ile alır — maplibre
     // container'a position:relative dayattığı için yüzde-yükseklik (h-full) çözülmüyordu.
-    // Lejant, relative wrapper'a göre absolute konumlanır.
+    // Lejant ve butonlar relative wrapper'a göre absolute konumlanır.
     <div className="relative flex w-full flex-1 flex-col">
       <div ref={containerRef} className="w-full flex-1" />
       {mapReady && <MapLegend active={activeCats} onToggle={toggleCat} onReset={resetCats} />}
+      <button
+        type="button"
+        onClick={handleLocateMe}
+        aria-label="Şu anki konumumu göster"
+        title="Şu anki konumumu göster"
+        className="absolute bottom-6 left-4 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white text-gray-700 shadow-lg hover:bg-gray-50"
+      >
+        <Icon name="locate-fixed" size={20} />
+      </button>
       {mapReady && visibleCount === 0 && (
         <div className="pointer-events-none absolute left-1/2 top-4 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-white/95 px-4 py-2 text-sm font-medium text-gray-600 shadow-lg ring-1 ring-black/5 backdrop-blur">
           <Icon name="info" size={16} className="text-gray-400" />

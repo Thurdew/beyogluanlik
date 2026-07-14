@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import Link from "next/link";
 import { MapView } from "./MapView";
 import { ReportDetailModal } from "./ReportDetailModal";
+import { EventSidebar } from "./EventSidebar";
 import { Icon } from "./icons";
 import type { MapReport } from "@/lib/reports";
 import type { DutyPharmacy } from "@/lib/pharmacies";
@@ -23,7 +24,13 @@ export function MapPageClient({
 
   return (
     <div className="relative flex flex-1 flex-col">
-      <MapView reports={reports} pharmacies={pharmacies} onSelectReport={handleSelectReport} />
+      <MapView
+        reports={reports}
+        pharmacies={pharmacies}
+        onSelectReport={handleSelectReport}
+        selectedReportId={selectedReportId}
+      />
+      <EventSidebar reports={reports} onSelectReport={handleSelectReport} />
       <Link
         href="/bildir"
         className="absolute bottom-6 right-6 flex items-center gap-1.5 rounded-full bg-blue-600 px-5 py-3 text-sm font-medium text-white shadow-lg hover:bg-blue-700"

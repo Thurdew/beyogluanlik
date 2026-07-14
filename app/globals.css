@@ -19,3 +19,61 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
 }
+
+/* Acil kategori (yangın, kaza vb.) olay pinlerinin arkasında büyüyüp sönen kırmızı tehlike
+   halkası — haritada dikkat çekmesi için. */
+@keyframes report-pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.6;
+  }
+  70% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+.report-pulse-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  border-radius: 9999px;
+  background: rgba(239, 68, 68, 0.6);
+  animation: report-pulse 1.8s ease-out infinite;
+  pointer-events: none;
+}
+
+/* Sağ paneldeki listeden veya haritadaki bir pinden bir olay seçildiğinde etrafında beliren mavi
+   seçim halkası — acil durum pulse halkasıyla karışmaması için ayrı renk/animasyon kullanılır. */
+@keyframes report-select-pop {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.report-selection-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  border-radius: 9999px;
+  border: 3px solid #2563eb;
+  background: rgba(37, 99, 235, 0.2);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.25);
+  animation: report-select-pop 0.35s ease-out;
+  pointer-events: none;
+}

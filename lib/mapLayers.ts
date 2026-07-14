@@ -9,6 +9,33 @@ import { clampInterpolate } from "./scale";
 export const MAP_MIN_ZOOM = 13;
 export const MAP_MAX_ZOOM = 17;
 
+// Saf uydu görüntüsü (Esri World Imagery, raster, API anahtarı gerekmiyor). Genel amaçlı OSM
+// vektör stillerinin (ör. "liberty") aksine sokak/POI sembol katmanı ve sprite içermez — bu
+// sayede "Image X could not be loaded / styleimagemissing" konsol spam'i tamamen ortadan kalkar.
+// Mahalle sınırları ve etiketleri ayrı katmanlar olarak (addDistrictBoundary / loadMahalleLayer)
+// bu görüntünün üzerine bindirilir.
+export const SATELLITE_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {
+    "esri-world-imagery": {
+      type: "raster",
+      tiles: [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: "Esri, Maxar, Earthstar Geographics",
+    },
+  },
+  layers: [
+    {
+      id: "esri-world-imagery-layer",
+      type: "raster",
+      source: "esri-world-imagery",
+    },
+  ],
+};
+
 const MAHALLE_GEOJSON_URL = "/data/beyoglu-mahalleler.geojson";
 const MAHALLE_LINE_COLOR = "#8B84DE";
 // Beyoğlu dışını karartan "spotlight" maskesi + net dış sınır çizgisi.
